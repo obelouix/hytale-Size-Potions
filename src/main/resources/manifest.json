@@ -1,14 +1,14 @@
 {
-    "Group": "Example",
-    "Name": "ExamplePlugin",
-    "Version": "0.0.2",
-    "Description": "An example plugin for HyTale!",
+    "Group": "Obelouix",
+    "Name": "Size Potions",
+    "Version": "0.0.1",
+    "Description": "A plugin that adds size potions for Hytale !",
     "Authors": [
         {
-            "Name": "It's you!"
+            "Name": "Obelouix"
         }
     ],
-    "Website": "example.org",
+    "Website": "https://github.com/obelouix/",
     "ServerVersion": "*",
     "Dependencies": {
         
@@ -17,6 +17,6 @@
         
     },
     "DisabledByDefault": false,
-    "Main": "org.example.plugin.ExamplePlugin",
+    "Main": "fr.obelouix.sizepotions.SizePotions",
     "IncludesAssetPack": true
 }
