@@ -1,154 +1,85 @@
-import groovy.json.JsonOutput
-import groovy.json.JsonSlurper
-import org.gradle.internal.os.OperatingSystem
-import org.jetbrains.gradle.ext.Application
-import org.jetbrains.gradle.ext.ProjectSettings
-import org.jetbrains.gradle.ext.runConfigurations
-
 plugins {
     java
-    id("org.jetbrains.gradle.plugin.idea-ext") version "1.3"
+    id("com.gradleup.shadow") version "9.3.1"
 }
 
-val patchline: String by project
-val javaVersion: String by project.properties.mapKeys { "java_version" }
-val includesPack: String by project.properties.mapKeys { "includes_pack" }
-val loadUserMods: String by project.properties.mapKeys { "load_user_mods" }
+group = "fr.obelouix.sizepotions"
+version = "0.0.1"
 
-val hytaleHome: String by lazy {
-    if (project.hasProperty("hytale_home")) {
-        project.findProperty("hytale_home") as String
-    } else {
-        val os = OperatingSystem.current()
-        val userHome = System.getProperty("user.home")
-        
-        when {
-            os.isWindows -> "$userHome/AppData/Roaming/Hytale"
-            os.isMacOsX -> "$userHome/Library/Application Support/Hytale"
-            os.isLinux -> {
-                val flatpakPath = "$userHome/.var/app/com.hypixel.HytaleLauncher/data/Hytale"
-                if (file(flatpakPath).exists()) {
-                    flatpakPath
-                } else {
-                    "$userHome/.local/share/Hytale"
-                }
-            }
-            else -> throw GradleException("Your Hytale install could not be detected automatically. Please define 'hytale_home'.")
-        }
-    }
-}
-
-if (!file(hytaleHome).exists()) {
-    throw GradleException("Failed to find Hytale at the expected location: $hytaleHome. Please check your installation or set 'hytale_home'.")
-}
-
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(javaVersion))
-    }
-    withSourcesJar()
-    withJavadocJar()
-}
-
-tasks.javadoc {
-    options {
-        (this as StandardJavadocDocletOptions).addStringOption("Xdoclint:-missing", "-quiet")
+repositories {
+    mavenCentral()
+    maven {
+        name = "hytale"
+        url = uri("https://repo.hytale.com/releases")
     }
 }
 
 dependencies {
-    implementation(files("$hytaleHome/install/$patchline/package/game/latest/Server/HytaleServer.jar"))
+    compileOnly(files("E:\\Hytale\\install\\release\\package\\game\\latest\\Server\\HytaleServer.jar"))
+
+    implementation("com.google.guava:guava:32.1.3-jre")
+    implementation("com.google.code.gson:gson:2.10.1")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.1")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-val serverRunDir = file("$projectDir/run")
-if (!serverRunDir.exists()) {
-    serverRunDir.mkdirs()
-}
-
-fun createServerRunArguments(srcDir: String): String {
-    val args = StringBuilder()
-    args.append("--allow-op --disable-sentry --assets=\"$hytaleHome/install/$patchline/package/game/latest/Assets.zip\"")
-    
-    val modPaths = mutableListOf<String>()
-    
-    if (includesPack.toBoolean()) {
-        modPaths.add(srcDir)
-    }
-    if (loadUserMods.toBoolean()) {
-        modPaths.add("$hytaleHome/UserData/Mods")
-    }
-    
-    if (modPaths.isNotEmpty()) {
-        args.append(" --mods=\"${modPaths.joinToString(",")}\"")
-    }
-    return args.toString()
-}
-
-tasks.register("updatePluginManifest") {
-    val manifestFile = file("src/main/resources/manifest.json")
-    
-    doLast {
-        if (!manifestFile.exists()) {
-            throw GradleException("Could not find manifest.json at ${manifestFile.path}!")
-        }
-        
-        val jsonMap = JsonSlurper().parseText(manifestFile.readText()) as MutableMap<String, Any>
-        
-        jsonMap["Version"] = version.toString()
-        jsonMap["IncludesAssetPack"] = includesPack.toBoolean()
-        
-        manifestFile.writeText(JsonOutput.prettyPrint(JsonOutput.toJson(jsonMap)))
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(25))
     }
 }
 
-tasks.named("processResources") {
-    dependsOn("updatePluginManifest")
+tasks.test {
+    useJUnitPlatform()
 }
 
-// --- Configuration IDEA (IntelliJ) ---
-idea {
-    project {
-        settings {
-            runConfigurations {
-                register<Application>("HytaleServer") {
-                    mainClass = "com.hypixel.hytale.Main"
-                    moduleName = "${project.name}.main"
-                    // On récupère le chemin des sources main
-                    val mainSrcDir = sourceSets.main.get().java.srcDirs.first().parentFile.absolutePath
-                    programParameters = createServerRunArguments(mainSrcDir)
-                    workingDirectory = serverRunDir.absolutePath
-                }
-            }
-        }
-    }
+tasks.shadowJar {
+    archiveClassifier.set("")
+    relocate("com.google.gson", "fr.obelouix.sizepotions.libs.gson")
 }
 
-// --- Configuration VSCode ---
-tasks.register("generateVSCodeLaunch") {
-    val vscodeDir = file("$projectDir/.vscode")
-    val launchFile = file("$vscodeDir/launch.json")
-    
-    doLast {
-        if (!vscodeDir.exists()) {
-            vscodeDir.mkdirs()
-        }
-        
-        val programParams = createServerRunArguments("\${workspaceFolder}")
-        
-        val launchConfig = mapOf(
-            "version" to "0.2.0",
-            "configurations" to listOf(
-                mapOf(
-                    "type" to "java",
-                    "name" to "HytaleServer",
-                    "request" to "launch",
-                    "mainClass" to "com.hypixel.hytale.Main",
-                    "args" to programParams,
-                    "cwd" to "\${workspaceFolder}/run"
-                )
-            )
+tasks.build {
+    dependsOn(tasks.shadowJar)
+}
+
+tasks.processResources {
+    filesMatching("manifest.json") {
+        expand(
+            "version" to project.version,
+            "name" to project.name
         )
-        
-        launchFile.writeText(JsonOutput.prettyPrint(JsonOutput.toJson(launchConfig)))
     }
+}
+
+// --- Tâche d'exécution ---
+tasks.register<JavaExec>("runHytale") {
+    group = "hytale"
+    description = "Lance le serveur Hytale avec le plugin inclus dans le classpath"
+
+    // Construit le plugin avant de lancer
+    dependsOn(tasks.shadowJar)
+
+    // Dossier d'exécution
+    workingDir = file("run")
+
+    // Crée le dossier run s'il n'existe pas (pour éviter une erreur si le dossier est absent)
+    doFirst {
+        mkdir(workingDir)
+    }
+
+    // Classpath : Serveur Hytale + Ton Plugin (Shadow)
+    classpath = files(
+        "E:\\Hytale\\install\\release\\package\\game\\latest\\Server\\HytaleServer.jar",
+        tasks.shadowJar.get().archiveFile
+    )
+
+    // Classe principale définie selon ta demande
+    mainClass.set("com.hypixel.hytale.Main")
+
+    // Arguments obligatoires
+    args("--assets", "E:\\Hytale\\install\\release\\package\\game\\latest\\Assets.zip", "--allow-op")
+
+    // Entrée standard pour la console
+    standardInput = System.`in`
 }
